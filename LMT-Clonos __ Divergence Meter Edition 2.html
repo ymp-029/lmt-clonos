@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LMT-Clonos // Divergence Meter Edition</title>
+<style>
+:root{--g:#00ff66;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:#000;color:var(--g);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;overflow-x:hidden}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:20px 12px 28px;box-sizing:border-box;gap:18px}
+.logo{font-size:clamp(56px,10vw,96px);line-height:1;text-align:center;filter:drop-shadow(0 0 10px #00ff66) drop-shadow(0 0 28px #00ff66);animation:fl 5s infinite}
+h1{margin:8px 0 0;font-size:clamp(12px,2.6vw,20px);letter-spacing:.28em;font-weight:400;text-align:center;text-shadow:0 0 8px var(--g),0 0 22px var(--g)}
+#status{font-size:11px;letter-spacing:.2em;opacity:.7;text-align:center;margin-top:6px}
+.meter{width:100%;max-width:1100px;mix-blend-mode:screen}
+.meter svg{width:100%;height:auto;display:block;overflow:visible}
+.s{fill:#00ff66;opacity:.07}
+.s.on{fill:#b8ffd5;stroke:#00ff66;stroke-width:1.5;opacity:1}
+.sub{display:grid;grid-template-columns:auto auto;gap:4px 18px;font-size:clamp(13px,3vw,22px);text-shadow:0 0 8px var(--g);justify-content:center}
+.sub b{font-weight:400;opacity:.65;letter-spacing:.15em}
+.sub span{text-align:right;font-variant-numeric:tabular-nums}
+#eot{grid-column:1/-1;text-align:center;font-size:11px;opacity:.55;letter-spacing:.2em}
+.sw{display:flex;align-items:center;gap:14px;cursor:pointer;user-select:none;font-size:14px;letter-spacing:.1em}
+.sw input{position:absolute;opacity:0}
+.sw i{width:56px;height:26px;border:2px solid var(--g);border-radius:14px;position:relative;box-shadow:0 0 10px var(--g),inset 0 0 8px rgba(0,255,102,.4)}
+.sw i::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--g);box-shadow:0 0 10px var(--g);transition:transform .2s}
+.sw input:checked+i::after{transform:translateX(30px)}
+.sw input:focus-visible+i{outline:2px dashed var(--g);outline-offset:4px}
+.sw span{opacity:.4;transition:opacity .2s}
+.sw span.act{opacity:1;text-shadow:0 0 8px var(--g)}
+.fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;mix-blend-mode:multiply;z-index:10}
+@keyframes fl{0%,92%,100%{opacity:1}94%{opacity:.78}96%{opacity:1}98%{opacity:.88}}
+@media (prefers-reduced-motion:reduce){.logo{animation:none}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo">🌐</div>
+    <h1>LMT-Clonos // DISTORTION METER</h1>
+    <div id="status">INITIALIZING...</div>
+  </header>
+
+  <div class="meter">
+    <svg id="svg" viewBox="0 0 800 124" role="img" aria-label="Distortion meter">
+      <defs>
+        <filter id="b1" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="4"/></filter>
+        <filter id="b2" x="-15%" y="-40%" width="130%" height="180%"><feGaussianBlur stdDeviation="14"/></filter>
+      </defs>
+      <g id="m" transform="skewX(-6)"></g>
+      <use href="#m" filter="url(#b1)" style="mix-blend-mode:screen"/>
+      <use href="#m" filter="url(#b2)" style="mix-blend-mode:screen"/>
+    </svg>
+  </div>
+
+  <div class="sub">
+    <b>JST</b><span id="jst">--:--:--.--</span>
+    <b>TRUE</b><span id="tru">--:--:--.--</span>
+    <div id="eot"></div>
+  </div>
+
+  <label class="sw">
+    <span id="lh" class="act">現在地</span>
+    <input type="checkbox" id="tg" aria-label="東京タワーのダミーモード">
+    <i></i>
+    <span id="lt">東京タワー</span>
+  </label>
+</main>
+
+<svg class="fx" aria-hidden="true">
+  <defs>
+    <pattern id="sl" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#fff"/><rect y="2" width="4" height="2" fill="#6e6e6e"/>
+    </pattern>
+    <radialGradient id="vg" cx="50%" cy="50%" r="75%"><stop offset="60%" stop-color="#fff"/><stop offset="100%" stop-color="#555"/></radialGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#sl)"/>
+  <rect width="100%" height="100%" fill="url(#vg)"/>
+</svg>
+
+<script>
+(()=>{
+const JST_LON=135, TOWER_LON=139.7454;
+// true: 小数点以下2桁(cs)を観測ゆらぎとして高速に変動させる / false: 実測値そのまま
+const FLICKER=false;
+
+let homeLon=135, geo='FALLBACK // AKASHI', dummy=false;
+const $=id=>document.getElementById(id);
+const NS='http://www.w3.org/2000/svg';
+
+/* ---- Geolocation (座標は画面に一切出さない) ---- */
+if(navigator.geolocation){
+  geo='ACQUIRING...';
+  navigator.geolocation.getCurrentPosition(
+    p=>{homeLon=p.coords.longitude;geo='GPS LOCK'},
+    ()=>{homeLon=JST_LON;geo='FALLBACK // AKASHI'},
+    {timeout:10000,maximumAge:600000}
+  );
+}
+
+/* ---- 均時差 (Spencer式) 秒 ---- */
+function eotSec(ms){
+  const y=new Date(ms).getUTCFullYear();
+  const n=(ms-Date.UTC(y,0,1))/864e5;
+  const g=2*Math.PI/365*(n-0.5);
+  return 229.18*(0.000075+0.001868*Math.cos(g)-0.032077*Math.sin(g)-0.014615*Math.cos(2*g)-0.040849*Math.sin(2*g))*60;
+}
+
+/* ---- 7セグメント ---- */
+const P=a=>a.map(p=>p.join(',')).join(' ');
+const hs=(x1,x2,cy)=>P([[x1,cy],[x1+4,cy-4],[x2-4,cy-4],[x2,cy],[x2-4,cy+4],[x1+4,cy+4]]);
+const vs=(cx,y1,y2)=>P([[cx,y1],[cx+4,y1+4],[cx+4,y2-4],[cx,y2],[cx-4,y2-4],[cx-4,y1+4]]);
+const SEG={a:hs(6,50,4),g:hs(6,50,50),d:hs(6,50,96),f:vs(4,6,48),b:vs(52,6,48),e:vs(4,52,94),c:vs(52,52,94)};
+const DIG=['abcdef','bc','abged','abgcd','fgbc','afgcd','afgedc','abc','abcdefg','abcdfg'];
+const mk=(tag,attrs,parent)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);parent.appendChild(e);return e};
+const cls=(e,on)=>e.setAttribute('class',on?'s on':'s');
+
+const M=$('m'), svg=$('svg');
+let slots=[], signSlot=null, nDigits=0;
+
+function build(n){
+  nDigits=n; M.textContent=''; slots=[];
+  const items=['s',...Array(n).fill('d'),':','d','d','.','d','d'];
+  let x=0;
+  for(const t of items){
+    const g=mk('g',{transform:`translate(${x},0)`},M);
+    if(t==='d'){
+      const o={v:-1,segs:{}};
+      for(const k in SEG)o.segs[k]=mk('polygon',{points:SEG[k],class:'s'},g);
+      slots.push(o); x+=68;
+    }else if(t==='s'){
+      signSlot={v:null,g:mk('polygon',{points:SEG.g,class:'s'},g),p:mk('polygon',{points:vs(28,22,78),class:'s'},g)};
+      x+=68;
+    }else if(t===':'){
+      mk('circle',{cx:10,cy:30,r:5,class:'s on'},g);mk('circle',{cx:10,cy:70,r:5,class:'s on'},g);x+=28;
+    }else{
+      mk('circle',{cx:10,cy:94,r:5,class:'s on'},g);x+=28;
+    }
+  }
+  svg.setAttribute('viewBox',`-10 -12 ${x+14} 124`);
+}
+function setDigit(o,v){
+  if(o.v===v)return; o.v=v;
+  const on=DIG[v];
+  for(const k in o.segs)cls(o.segs[k],on.includes(k));
+}
+function setSign(neg){
+  if(signSlot.v===neg)return; signSlot.v=neg;
+  cls(signSlot.g,true); cls(signSlot.p,!neg);
+}
+
+/* ---- 表示整形 ---- */
+const p2=n=>String(n).padStart(2,'0');
+function clock(ms){
+  const d=new Date(ms);
+  return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}.${p2(Math.floor(d.getUTCMilliseconds()/10))}`;
+}
+const jstEl=$('jst'), truEl=$('tru'), eotEl=$('eot'), stEl=$('status');
+let lastSt='';
+
+build(2);
+
+function frame(){
+  const now=Date.now();
+  const lon=dummy?TOWER_LON:homeLon;
+  const eot=eotSec(now);
+  const offMs=((lon-JST_LON)*240+eot)*1000;   // 経度差(4分/度)＋均時差
+  const neg=offMs<0;
+  const totalCs=Math.floor(Math.abs(offMs)/10);
+  const cs=FLICKER?(totalCs%100+Math.floor(now/10))%100:totalCs%100;
+  const sec=Math.floor(totalCs/100);
+  const mm=Math.floor(sec/60), ss=sec%60;
+  const ms=String(mm).padStart(2,'0');
+  if(ms.length!==nDigits)build(ms.length);
+
+  setSign(neg);
+  for(let i=0;i<ms.length;i++)setDigit(slots[i],+ms[i]);
+  const k=ms.length;
+  setDigit(slots[k],Math.floor(ss/10));
+  setDigit(slots[k+1],ss%10);
+  setDigit(slots[k+2],Math.floor(cs/10));
+  setDigit(slots[k+3],cs%10);
+
+  const jst=now+9*36e5;
+  jstEl.textContent=clock(jst);
+  truEl.textContent=clock(jst+offMs);
+  const e=Math.abs(eot), es=`EOT ${eot<0?'-':'+'}${p2(Math.floor(e/60))}:${p2(Math.floor(e%60))}`;
+  if(eotEl.textContent!==es)eotEl.textContent=es;
+
+  const st=dummy?'DUMMY MODE // TOKYO TOWER':geo;
+  if(st!==lastSt){lastSt=st;stEl.textContent=st}
+  requestAnimationFrame(frame);
+}
+
+$('tg').addEventListener('change',e=>{
+  dummy=e.target.checked;
+  $('lh').classList.toggle('act',!dummy);
+  $('lt').classList.toggle('act',dummy);
+});
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
