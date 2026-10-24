@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LMT-Clonos (Physical Offset Edition)</title>
+<style>
+:root{--g:#00ff66;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:#000;color:var(--g);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;overflow-x:hidden}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:20px 0 28px;box-sizing:border-box;gap:18px}
+header{text-align:center;padding:0 12px}
+.logo{font-size:clamp(56px,14vw,96px);line-height:1;filter:drop-shadow(0 0 10px var(--g)) drop-shadow(0 0 26px var(--g))}
+h1{margin:8px 0 0;font-size:clamp(16px,4vw,24px);letter-spacing:.3em;font-weight:400;text-shadow:0 0 8px var(--g),0 0 20px var(--g)}
+.stage{width:100%;max-width:1000px;display:flex;align-items:center;gap:4px;padding:0 4px;box-sizing:border-box}
+.nav{flex:0 0 auto;width:44px;height:64px;background:none;border:0;color:var(--g);font:inherit;font-size:34px;cursor:pointer;text-shadow:0 0 10px var(--g);opacity:.75}
+.nav:hover,.nav:focus-visible{opacity:1;outline:none}
+.track{flex:1;min-width:0;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none;overscroll-behavior-x:contain}
+.track::-webkit-scrollbar{display:none}
+.slide{flex:0 0 100%;scroll-snap-align:center;scroll-snap-stop:always;text-align:center}
+.slide h2{margin:0 0 12px;font-size:clamp(12px,3vw,16px);font-weight:400;letter-spacing:.3em;opacity:.8}
+.slide svg{width:100%;height:auto;display:block;filter:drop-shadow(0 0 5px #00ff66) drop-shadow(0 0 16px rgba(0,255,102,.6))}
+.s{fill:#00ff66;opacity:.07}
+.s.on{fill:#b8ffd5;stroke:#00ff66;stroke-width:1.5;opacity:1}
+.dots{display:flex;gap:12px;justify-content:center}
+.dots i{width:10px;height:10px;border:1.5px solid var(--g);border-radius:50%;transition:background .2s,box-shadow .2s}
+.dots i.act{background:var(--g);box-shadow:0 0 10px var(--g)}
+.info{text-align:center;font-size:clamp(11px,3vw,14px);letter-spacing:.12em;line-height:1.8;padding:0 12px;text-shadow:0 0 6px var(--g)}
+.info div{opacity:.75}
+.sw{display:flex;align-items:center;gap:14px;cursor:pointer;user-select:none;font-size:14px;letter-spacing:.1em}
+.sw input{position:absolute;opacity:0}
+.sw i{width:56px;height:26px;border:2px solid var(--g);border-radius:14px;position:relative;box-shadow:0 0 10px var(--g),inset 0 0 8px rgba(0,255,102,.4)}
+.sw i::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--g);box-shadow:0 0 10px var(--g);transition:transform .2s}
+.sw input:checked+i::after{transform:translateX(30px)}
+.sw input:focus-visible+i{outline:2px dashed var(--g);outline-offset:4px}
+.sw span{opacity:.4;transition:opacity .2s}
+.sw span.act{opacity:1;text-shadow:0 0 8px var(--g)}
+@media (prefers-reduced-motion:reduce){.track{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo">🌐</div>
+    <h1>LMT-Clonos</h1><div style="font-size:11px;letter-spacing:.3em;opacity:.7;margin-top:6px">PHYSICAL OFFSET EDITION</div>
+  </header>
+
+  <section aria-label="Clock slider">
+    <div class="stage">
+      <button class="nav" id="prev" aria-label="前へ">&lsaquo;</button>
+      <div class="track" id="track" tabindex="0">
+        <div class="slide"><h2>JST // 日本標準時</h2><svg id="c0" role="img" aria-label="JST clock"></svg></div>
+        <div class="slide"><h2>LMT // 地方平均時（物理時差）</h2><svg id="c1" role="img" aria-label="Local mean time clock"></svg></div>
+      </div>
+      <button class="nav" id="next" aria-label="次へ">&rsaquo;</button>
+    </div>
+    <div class="dots" id="dots" style="margin-top:14px"><i class="act"></i><i></i></div>
+  </section>
+
+  <div class="info">
+    <div id="i1">INITIALIZING...</div>
+    <div id="i2"></div>
+  </div>
+
+  <label class="sw">
+    <span id="lh" class="act">現在地</span>
+    <input type="checkbox" id="tg" aria-label="東京タワーのダミーモード">
+    <i></i>
+    <span id="lt">東京タワー</span>
+  </label>
+</main>
+
+<script>
+(()=>{
+const JST_LON=135, TOWER_LON=139.7454;
+let homeLon=135, geo='AKASHI // DEFAULT', dummy=false;
+const $=id=>document.getElementById(id);
+const NS='http://www.w3.org/2000/svg';
+
+/* Geolocation: 座標は画面に出さない */
+if(navigator.geolocation){
+  geo='ACQUIRING...';
+  navigator.geolocation.getCurrentPosition(
+    p=>{homeLon=p.coords.longitude;geo='GPS LOCK'},
+    ()=>{homeLon=JST_LON;geo='AKASHI // DEFAULT'},
+    {timeout:10000,maximumAge:600000}
+  );
+}
+
+/* 均時差 (Spencer式・通日ベース) 秒 */
+function eotSec(ms){
+  const y=new Date(ms).getUTCFullYear();
+  const n=(ms-Date.UTC(y,0,1))/864e5;
+  const g=2*Math.PI/365*(n-0.5);
+  return 229.18*(0.000075+0.001868*Math.cos(g)-0.032077*Math.sin(g)-0.014615*Math.cos(2*g)-0.040849*Math.sin(2*g))*60;
+}
+
+/* 7セグメント */
+const P=a=>a.map(p=>p.join(',')).join(' ');
+const hs=(x1,x2,cy)=>P([[x1,cy],[x1+4,cy-4],[x2-4,cy-4],[x2,cy],[x2-4,cy+4],[x1+4,cy+4]]);
+const vs=(cx,y1,y2)=>P([[cx,y1],[cx+4,y1+4],[cx+4,y2-4],[cx,y2],[cx-4,y2-4],[cx-4,y1+4]]);
+const SEG={a:hs(6,50,4),g:hs(6,50,50),d:hs(6,50,96),f:vs(4,6,48),b:vs(52,6,48),e:vs(4,52,94),c:vs(52,52,94)};
+const DIG=['abcdef','bc','abged','abgcd','fgbc','afgcd','afgedc','abc','abcdefg','abcdfg'];
+const mk=(tag,attrs,parent)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);parent.appendChild(e);return e};
+
+/* HH:MM:SS.cs の時計を1つ組み立てる（ポリゴンは生成後に使い回し、変化した桁のclassだけ更新） */
+function buildClock(svg){
+  const root=mk('g',{transform:'skewX(-6)'},svg);
+  const slots=[]; let x=0;
+  const items=['d','d',':','d','d',':','d','d','.','d','d'];
+  for(const t of items){
+    const g=mk('g',{transform:`translate(${x},0)`},root);
+    if(t==='d'){
+      const o={v:-1,segs:{}};
+      for(const k in SEG)o.segs[k]=mk('polygon',{points:SEG[k],class:'s'},g);
+      slots.push(o); x+=68;
+    }else if(t===':'){
+      mk('circle',{cx:10,cy:32,r:5.5,class:'s on'},g);mk('circle',{cx:10,cy:68,r:5.5,class:'s on'},g);x+=28;
+    }else{
+      mk('circle',{cx:10,cy:94,r:5.5,class:'s on'},g);x+=28;
+    }
+  }
+  svg.setAttribute('viewBox',`-10 -12 ${x+12} 124`);
+  return slots;
+}
+function setDigit(o,v){
+  if(o.v===v)return; o.v=v;
+  const on=DIG[v];
+  for(const k in o.segs)o.segs[k].setAttribute('class',on.includes(k)?'s on':'s');
+}
+function show(slots,ms){
+  const d=new Date(ms);
+  const h=d.getUTCHours(), m=d.getUTCMinutes(), s=d.getUTCSeconds(), cs=Math.floor(d.getUTCMilliseconds()/10);
+  setDigit(slots[0],(h/10)|0);setDigit(slots[1],h%10);
+  setDigit(slots[2],(m/10)|0);setDigit(slots[3],m%10);
+  setDigit(slots[4],(s/10)|0);setDigit(slots[5],s%10);
+  setDigit(slots[6],(cs/10)|0);setDigit(slots[7],cs%10);
+}
+
+const jstSlots=buildClock($('c0')), truSlots=buildClock($('c1'));
+const i1=$('i1'), i2=$('i2');
+let last1='', last2='';
+
+function frame(){
+  const now=Date.now();
+  const lon=dummy?TOWER_LON:homeLon;
+  const offMs=(lon-JST_LON)*240*1000;  // 物理時差のみ（経度1度＝4分、均時差は含めない）
+  const jst=now+9*36e5;
+  show(jstSlots,jst);
+  show(truSlots,jst+offMs);
+
+  const a=dummy?'DUMMY MODE // 東京タワー':geo;
+  const b=dummy?'LON 139.74° // JSTより約19分進み（経度差のみ）':'座標・時差は表示しません';
+  if(a!==last1){last1=a;i1.textContent=a}
+  if(b!==last2){last2=b;i2.textContent=b}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* スライダー */
+const track=$('track'), dots=$('dots').children;
+const idx=()=>Math.round(track.scrollLeft/track.clientWidth);
+const go=i=>track.scrollTo({left:Math.max(0,Math.min(1,i))*track.clientWidth});
+$('prev').onclick=()=>go(idx()-1);
+$('next').onclick=()=>go(idx()+1);
+track.addEventListener('scroll',()=>{const i=idx();for(let k=0;k<dots.length;k++)dots[k].classList.toggle('act',k===i)},{passive:true});
+track.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')go(idx()-1);if(e.key==='ArrowRight')go(idx()+1)});
+
+$('tg').addEventListener('change',e=>{
+  dummy=e.target.checked;
+  $('lh').classList.toggle('act',!dummy);
+  $('lt').classList.toggle('act',dummy);
+});
+})();
+</script>
+</body>
+</html>
